@@ -14,7 +14,7 @@ ui <- fluidPage(
     tabPanel(
       "Initial rate calculation",
       fluidRow(
-        column(6,rHandsontableOutput("table2")),
+        column(6,rHandsontableOutput("table1")),
         column(6,
                h4("Initial Rate (Slope)"),
                tableOutput("initial_rates_table"),
@@ -26,7 +26,7 @@ ui <- fluidPage(
       fluidRow(
         column(12,"Move the slider so that only the initial linear portion of the graph is used for the line of best fit")
       ),
-      sliderInput("slider_id", "", min = 20, max = 180, step = 20, value =c(20,60)),
+      sliderInput("slider_id", "", min = 0, max = 120, step = 15, value =c(15,60)),
       plotOutput("progressCurve")
     ),
     
@@ -45,8 +45,8 @@ ui <- fluidPage(
 # Define server logic required to draw a histogram
 server <- function(input, output) {
   # Define the initial data frame for Tab 2
-  data2 <- reactiveValues(df = data.frame(
-    Time = seq(20, 180, by = 20),
+  data1 <- reactiveValues(df = data.frame(
+    Time = seq(0, 120, by = 15),
     Assay = rep(NA, 9),
     stringsAsFactors = FALSE
   ))
@@ -58,32 +58,32 @@ server <- function(input, output) {
   
   # Convert Assay to numeric (if possible)
   observe({
-    data2$df$Assay <- as.numeric(data2$df$Assay)
+    data1$df$Assay <- as.numeric(data1$df$Assay)
   })
   
   # Render the data table for Tab 2
-  output$table2 <- renderRHandsontable({
-    rhandsontable(data2$df, rowHeaders = FALSE) %>% 
+  output$table1 <- renderRHandsontable({
+    rhandsontable(data1$df, rowHeaders = FALSE) %>% 
       hot_col("Time", type = "numeric", strict = TRUE, allowInvalid = FALSE, readOnly = TRUE, format = 0) %>%
       hot_col("Assay", type = "numeric", strict = TRUE, allowInvalid = FALSE, format = 0.000)
   })
   
   # Update dataframe after inputs
   observe({
-    if (!is.null(input$table2)) {
-      data2$df <- hot_to_r(input$table2)
+    if (!is.null(input$table1)) {
+      data1$df <- hot_to_r(input$table1)
     }
   })
   
   # Calculate initial rates and model statistics
   initial_rates_data <- reactive({
-    req(nrow(data2$df) > 0)
+    req(nrow(data1$df) > 0)
     
     slider_value_min <- input$slider_id[1]
     slider_value_max <- input$slider_id[2]
     
     # Subset the data based on the slider value
-    subset_data <- data2$df[data2$df$Time >= slider_value_min & data2$df$Time <= slider_value_max, ]
+    subset_data <- data1$df[data1$df$Time >= slider_value_min & data1$df$Time <= slider_value_max, ]
     
     # Check if we have valid data
     if (nrow(subset_data) < 2 || all(is.na(subset_data$Assay))) {
@@ -154,25 +154,25 @@ server <- function(input, output) {
   
   # Render the progress Curve scatter plot for Tab 2
   output$progressCurve <- renderPlot({
-    req(nrow(data2$df) > 0)
+    req(nrow(data1$df) > 0)
     
     #writes the slider input to the slider value
     slider_value_min <- input$slider_id[1]
     slider_value_max <- input$slider_id[2]
     
     # Subset the data based on the slider value
-    subset_data <- data2$df[data2$df$Time >= slider_value_min & data2$df$Time <= slider_value_max, ]
+    subset_data <- data1$df[data1$df$Time >= slider_value_min & data1$df$Time <= slider_value_max, ]
     
     tryCatch({
-      ggplot(data2$df, aes(x = Time)) +
+      ggplot(data1$df, aes(x = Time)) +
         geom_line(aes(y = Assay), color = "grey", size = 2) +
         geom_smooth(data = subset_data, aes(y = Assay), color = "black", method = "lm", se = FALSE, fullrange = TRUE, linetype = "dotted") +
         geom_point(aes(y = Assay), color = "black", size = 3) +
         labs(x = "Time (seconds)", y = "Absorbance", title = "Initial rate of reaction") +
         theme_minimal() +
-        scale_y_continuous(expand = c(0, 0), limits = c(0, max(data2$df$Assay, na.rm = TRUE) * 1.1)) +
-        scale_x_continuous(expand = c(0, 0), limits = c(0, 200), breaks = seq(0, max(data2$df$Time, na.rm = TRUE), by = 60), 
-                           minor_breaks = seq(0, max(data2$df$Time, na.rm = TRUE), by = 20)) +
+        scale_y_continuous(expand = c(0, 0), limits = c(0, max(data1$df$Assay, na.rm = TRUE) * 1.1)) +
+        scale_x_continuous(expand = c(0, 0), limits = c(0, 200), breaks = seq(0, max(data1$df$Time, na.rm = TRUE), by = 60), 
+                           minor_breaks = seq(0, max(data1$df$Time, na.rm = TRUE), by = 20)) +
         theme(axis.line.x = element_line(color = "black", size = 1),
               axis.line.y = element_line(color = "black", size = 1),
               plot.title = element_text(hjust = 0.5)) +
