@@ -1,0 +1,62 @@
+default:
+  image: docker:26
+
+services:
+  - docker:26-dind
+
+before_script:
+  - docker info
+  - echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
+
+stages:
+  - build
+  - push
+
+variables:
+  DOCKER_TLS_CERTDIR: ""
+
+
+Build:
+  stage: build
+  script:
+    - docker pull $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:latest || true
+    - >
+      docker build
+      --pull
+      --cache-from $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:latest
+      --label "org.opencontainers.image.title=$CI_PROJECT_TITLE"
+      --label "org.opencontainers.image.url=$CI_PROJECT_URL"
+      --label "org.opencontainers.image.created=$CI_JOB_STARTED_AT"
+      --label "org.opencontainers.image.revision=$CI_COMMIT_SHA"
+      --label "org.opencontainers.image.version=$CI_COMMIT_REF_NAME"
+      --tag $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA
+      .
+    - docker push $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA
+
+Push latest:
+  variables:
+    GIT_STRATEGY: none
+  stage: push
+  #only:
+    # Only "master" should be tagged "latest"
+    #- master
+  script:
+    - docker pull $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA
+    # tag it "latest"
+    - docker tag $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:latest
+    # push it
+    - docker push $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:latest
+
+# Docker tag any Git tag
+# GitLab will start a new pipeline everytime a Git tag is created
+Push tag:
+  variables:
+    GIT_STRATEGY: none
+  stage: push
+  only:
+    # run on tags only
+    - tags
+  script:
+    - docker pull $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA
+    - docker tag $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_REF_NAME
+    - docker push $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_REF_NAME
