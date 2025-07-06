@@ -12,25 +12,6 @@ ui <- fluidPage(
   tabsetPanel(
     
     tabPanel(
-      "Initial rate calculation",
-      fluidRow(
-        column(6,rHandsontableOutput("table1")),
-        column(6,
-               h4("Initial Rate (Slope)"),
-               tableOutput("initial_rates_table"),
-               br(),
-               h4("Linear Model Statistics"),
-               verbatimTextOutput("model_stats")
-        )
-      ),
-      fluidRow(
-        column(12,"Move the slider so that only the initial linear portion of the graph is used for the line of best fit")
-      ),
-      sliderInput("slider_id", "", min = 0, max = 120, step = 15, value =c(15,60)),
-      plotOutput("progressCurve")
-    ),
-    
-    tabPanel(
       "Km and Vmax Calculation",
       fluidRow(
         column(6,
@@ -61,12 +42,14 @@ ui <- fluidPage(
 
 # Define server logic required to draw a histogram
 server <- function(input, output) {
-  # Define the initial data frame for Tab 1 (Initial rate calculation)
-  data1 <- reactiveValues(df = data.frame(
-    Time = seq(0, 120, by = 15),
-    Assay = rep(NA, 9),
-    stringsAsFactors = FALSE
-  ))
+  
+  # UNITS CONFIGURATION - Change units here to update throughout the app
+  conc_units <- "µmol.mL⁻¹"
+  rate_units <- "µmol.mL⁻¹.min⁻¹"
+  
+  # Create display labels with units
+  conc_label <- paste0("Substrate Concentration (", conc_units, ")")
+  rate_label <- paste0("Initial Rate (", rate_units, ")")
   
   # Define the initial data frame for Tab 2 (Km and Vmax calculation)
   kinetics_data <- reactiveValues(df = data.frame(
@@ -76,47 +59,30 @@ server <- function(input, output) {
     check.names = FALSE
   ))
   
-  #The slider text
-  output$slider_label <- renderText({
-    "Move the slider so that only the initial linear portion of the graph is used for the line of best fit"
-  })
-  
-  # Convert Assay to numeric (if possible)
-  observe({
-    data1$df$Assay <- as.numeric(data1$df$Assay)
-  })
-  
   # Convert kinetics data to numeric
   observe({
     kinetics_data$df$`Substrate Concentration` <- as.numeric(kinetics_data$df$`Substrate Concentration`)
     kinetics_data$df$`Initial Rate` <- as.numeric(kinetics_data$df$`Initial Rate`)
   })
   
-  # Render the data table for Tab 1
-  output$table1 <- renderRHandsontable({
-    rhandsontable(data1$df, rowHeaders = FALSE) %>% 
-      hot_col("Time", type = "numeric", strict = TRUE, allowInvalid = FALSE, readOnly = TRUE, format = 0) %>%
-      hot_col("Assay", type = "numeric", strict = TRUE, allowInvalid = FALSE, format = 0.000)
-  })
-  
   # Render the kinetics table for Tab 2
   output$kinetics_table <- renderRHandsontable({
-    rhandsontable(kinetics_data$df, rowHeaders = FALSE) %>% 
-      hot_col("Substrate Concentration", type = "numeric", strict = TRUE, allowInvalid = FALSE, format = 0.000) %>%
-      hot_col("Initial Rate", type = "numeric", strict = TRUE, allowInvalid = FALSE, format = 0.000)
-  })
-  
-  # Update dataframe after inputs for Tab 1
-  observe({
-    if (!is.null(input$table1)) {
-      data1$df <- hot_to_r(input$table1)
-    }
+    # Create a copy of the data with proper column names for display
+    display_df <- kinetics_data$df
+    names(display_df) <- c(conc_label, rate_label)
+    
+    rhandsontable(display_df, rowHeaders = FALSE) %>% 
+      hot_col(conc_label, type = "numeric", strict = TRUE, allowInvalid = FALSE, format = 0.000) %>%
+      hot_col(rate_label, type = "numeric", strict = TRUE, allowInvalid = FALSE, format = 0.000)
   })
   
   # Update kinetics dataframe after inputs for Tab 2
   observe({
     if (!is.null(input$kinetics_table)) {
-      kinetics_data$df <- hot_to_r(input$kinetics_table)
+      temp_df <- hot_to_r(input$kinetics_table)
+      # Restore original column names for internal use
+      names(temp_df) <- c("Substrate Concentration", "Initial Rate")
+      kinetics_data$df <- temp_df
     }
   })
   
@@ -136,42 +102,6 @@ server <- function(input, output) {
     if (nrow(kinetics_data$df) > 1) {
       kinetics_data$df <- kinetics_data$df[-nrow(kinetics_data$df), ]
     }
-  })
-  
-  # Calculate initial rates and model statistics for Tab 1
-  initial_rates_data <- reactive({
-    req(nrow(data1$df) > 0)
-    
-    slider_value_min <- input$slider_id[1]
-    slider_value_max <- input$slider_id[2]
-    
-    # Subset the data based on the slider value
-    subset_data <- data1$df[data1$df$Time >= slider_value_min & data1$df$Time <= slider_value_max, ]
-    
-    # Check if we have valid data
-    if (nrow(subset_data) < 2 || all(is.na(subset_data$Assay))) {
-      return(NULL)
-    }
-    
-    results <- list()
-    
-    tryCatch({
-      # Remove rows with NA values
-      subset_assay <- subset_data[!is.na(subset_data$Assay), ]
-      
-      if (nrow(subset_assay) >= 2) {
-        fit <- lm(Assay ~ Time, data = subset_assay)
-        results$fit <- fit
-        # Convert from abs/sec to abs/min by multiplying by 60
-        results$rate <- coef(fit)[2] * 60  # slope * 60 seconds/minute
-        results$r_squared <- summary(fit)$r.squared
-        results$p_value <- summary(fit)$coefficients[2, 4]  # p-value for slope
-      }
-      
-      return(results)
-    }, error = function(e) {
-      return(NULL)
-    })
   })
   
   # Calculate Michaelis-Menten parameters
@@ -223,26 +153,6 @@ server <- function(input, output) {
     })
   })
   
-  # Display initial rates table for Tab 1
-  output$initial_rates_table <- renderTable({
-    rates_data <- initial_rates_data()
-    
-    if (is.null(rates_data)) {
-      return(data.frame(Message = "Enter data to calculate initial rate"))
-    }
-    
-    rate_table <- data.frame(
-      Assay = "Single Assay",
-      `Initial Rate (abs/min)` = round(rates_data$rate, 6),
-      `R-squared` = round(rates_data$r_squared, 4),
-      `P-value` = ifelse(rates_data$p_value < 0.001, "<0.001", round(rates_data$p_value, 4)),
-      stringsAsFactors = FALSE,
-      check.names = FALSE
-    )
-    
-    return(rate_table)
-  }, digits = 6)
-  
   # Display Michaelis-Menten parameters table
   output$kinetics_params_table <- renderTable({
     mm_data <- michaelis_menten_fit()
@@ -254,33 +164,12 @@ server <- function(input, output) {
     params_table <- data.frame(
       Parameter = c("Vmax", "Km", "R-squared"),
       Value = c(round(mm_data$Vmax, 4), round(mm_data$Km, 4), round(mm_data$r_squared, 4)),
-      Units = c("Initial Rate Units", "Substrate Concentration Units", ""),
+      Units = c(rate_units, conc_units, ""),
       stringsAsFactors = FALSE
     )
     
     return(params_table)
   }, digits = 4)
-  
-  # Display model statistics for Tab 1
-  output$model_stats <- renderText({
-    rates_data <- initial_rates_data()
-    
-    if (is.null(rates_data)) {
-      return("Enter data to see model statistics")
-    }
-    
-    stats_text <- ""
-    
-    if (!is.null(rates_data$fit)) {
-      stats_text <- paste0("Linear Model:\n")
-      stats_text <- paste0(stats_text, "Equation: Absorbance = ", 
-                           round(coef(rates_data$fit)[1], 6), " + ", 
-                           round(coef(rates_data$fit)[2], 6), " × Time\n")
-      stats_text <- paste0(stats_text, "Initial Rate: ", round(rates_data$rate, 6), " abs/min\n")
-    }
-    
-    return(stats_text)
-  })
   
   # Display kinetics model statistics
   output$kinetics_model_stats <- renderText({
@@ -294,42 +183,11 @@ server <- function(input, output) {
     stats_text <- paste0("Michaelis-Menten Model:\n")
     stats_text <- paste0(stats_text, "Equation: V = (", round(mm_data$Vmax, 4), " × [S]) / (", 
                          round(mm_data$Km, 4), " + [S])\n")
-    stats_text <- paste0(stats_text, "Vmax = ", round(mm_data$Vmax, 4), " (maximum velocity)\n")
-    stats_text <- paste0(stats_text, "Km = ", round(mm_data$Km, 4), " (substrate concentration at Vmax/2)\n")
+    stats_text <- paste0(stats_text, "Vmax = ", round(mm_data$Vmax, 4), " ", rate_units, " (maximum velocity)\n")
+    stats_text <- paste0(stats_text, "Km = ", round(mm_data$Km, 4), " ", conc_units, " (substrate concentration at Vmax/2)\n")
     stats_text <- paste0(stats_text, "R² = ", round(mm_data$r_squared, 4))
     
     return(stats_text)
-  })
-  
-  # Render the progress Curve scatter plot for Tab 1
-  output$progressCurve <- renderPlot({
-    req(nrow(data1$df) > 0)
-    
-    #writes the slider input to the slider value
-    slider_value_min <- input$slider_id[1]
-    slider_value_max <- input$slider_id[2]
-    
-    # Subset the data based on the slider value
-    subset_data <- data1$df[data1$df$Time >= slider_value_min & data1$df$Time <= slider_value_max, ]
-    
-    tryCatch({
-      ggplot(data1$df, aes(x = Time)) +
-        geom_line(aes(y = Assay), color = "grey", size = 2) +
-        geom_smooth(data = subset_data, aes(y = Assay), color = "black", method = "lm", se = FALSE, fullrange = TRUE, linetype = "dotted") +
-        geom_point(aes(y = Assay), color = "black", size = 3) +
-        labs(x = "Time (seconds)", y = "Absorbance", title = "Initial rate of reaction") +
-        theme_minimal() +
-        scale_y_continuous(expand = c(0, 0), limits = c(0, max(data1$df$Assay, na.rm = TRUE) * 1.1)) +
-        scale_x_continuous(expand = c(0, 0), limits = c(0, 200), breaks = seq(0, max(data1$df$Time, na.rm = TRUE), by = 60), 
-                           minor_breaks = seq(0, max(data1$df$Time, na.rm = TRUE), by = 20)) +
-        theme(axis.line.x = element_line(color = "black", size = 1),
-              axis.line.y = element_line(color = "black", size = 1),
-              plot.title = element_text(hjust = 0.5)) +
-        theme(panel.grid.major = element_line(colour = "grey", linetype = "solid"),
-              axis.line = element_line(colour = "black", size = 1, linetype = "solid"))
-      
-      
-    }, error = function(e){"The plot will appear once you have entered your data"})
   })
   
   # Render Michaelis-Menten plot for Tab 2
@@ -345,12 +203,12 @@ server <- function(input, output) {
     }
     
     tryCatch({
-      # Create the plot
+      # Create the plot with units in axis labels
       p <- ggplot(mm_data$data, aes(x = S, y = V)) +
         geom_point(color = "black", size = 4) +
         geom_line(data = mm_data$pred_data, aes(x = S, y = V), color = "blue", size = 1.2) +
-        labs(x = "Substrate Concentration [S]", 
-             y = "Initial Velocity (V)", 
+        labs(x = paste0("Substrate Concentration [S] (", conc_units, ")"), 
+             y = paste0("Initial Velocity (V) (", rate_units, ")"), 
              title = "Michaelis-Menten Plot") +
         theme_minimal() +
         theme(axis.line.x = element_line(color = "black", size = 1),
@@ -359,19 +217,20 @@ server <- function(input, output) {
               axis.title = element_text(size = 14),
               axis.text = element_text(size = 12)) +
         theme(panel.grid.major = element_line(colour = "grey", linetype = "dotted"),
-              axis.line = element_line(colour = "black", size = 1, linetype = "solid"))
+              axis.line = element_line(colour = "black", size = 1, linetype = "solid")) +
+        scale_y_continuous(limits = c(0, NA))
       
-      # Add Vmax and Km reference lines
+      # Add Vmax and Km reference lines with units in annotations
       p <- p + 
         geom_hline(yintercept = mm_data$Vmax, linetype = "dashed", color = "red", alpha = 0.7) +
         geom_vline(xintercept = mm_data$Km, linetype = "dashed", color = "red", alpha = 0.7) +
         geom_hline(yintercept = mm_data$Vmax/2, linetype = "dashed", color = "orange", alpha = 0.7) +
         annotate("text", x = max(mm_data$data$S) * 0.7, y = mm_data$Vmax * 1.05, 
-                 label = paste("Vmax =", round(mm_data$Vmax, 3)), color = "red", size = 4) +
+                 label = paste("Vmax =", round(mm_data$Vmax, 3), rate_units), color = "red", size = 4) +
         annotate("text", x = mm_data$Km * 1.1, y = max(mm_data$data$V) * 0.9, 
-                 label = paste("Km =", round(mm_data$Km, 3)), color = "red", size = 4) +
+                 label = paste("Km =", round(mm_data$Km, 3), conc_units), color = "red", size = 4) +
         annotate("text", x = max(mm_data$data$S) * 0.7, y = (mm_data$Vmax/2) * 1.1, 
-                 label = paste("Vmax/2 =", round(mm_data$Vmax/2, 3)), color = "orange", size = 4)
+                 label = paste("Vmax/2 =", round(mm_data$Vmax/2, 3), rate_units), color = "orange", size = 4)
       
       return(p)
       
